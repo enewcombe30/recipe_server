@@ -1,17 +1,21 @@
+require("dotenv").config({ path: "./.env" });
 const express = require("express");
-require("dotenv").config();
 const { Pool } = require("pg");
+const cors = require("cors"); // Add this line to import the CORS package
 
 const app = express();
 const port = 3001;
 
+// Enable CORS for all origins (can be adjusted later to be more specific)
+app.use(cors()); // Use CORS middleware globally for all routes
+
 // Create a new pool to connect to the PostgreSQL database
 const pool = new Pool({
-  user: "postgres", // Your database username
-  host: "localhost", // Database server address
-  database: "recipe_db", // Your database name
-  password: process.env.DB_PASSWORD, // Your database password
-  port: 5432, // Default PostgreSQL port
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT,
 });
 
 // Middleware to parse JSON
