@@ -27,8 +27,6 @@ app.use(express.json());
 // ✅ Fetch Recipes with Ingredients
 const getRecipes = async (req, res) => {
   try {
-    console.log("📢 Fetching recipes..."); // Log API call
-
     const query = `
       SELECT 
     r.id AS recipe_id,
@@ -44,14 +42,17 @@ const getRecipes = async (req, res) => {
             'name', i.name,
             'amount', ri.amount,
             'allergies', (
-                SELECT COALESCE(json_agg(ia.allergy), '[]') -- Allergy stored as string
-                FROM ingredient_allergies ia
-                WHERE ia.ingredient_id = i.id
+              SELECT COALESCE(json_agg(a.name), '[]') 
+              FROM ingredient_allergies ia
+              JOIN allergens a ON ia.allergen_id = a.id 
+              WHERE ia.ingredient_id = i.id
             ),
                         'dietary_tags', (
-                SELECT COALESCE(json_agg(it.tag), '[]') 
-                FROM ingredient_tags it
-                WHERE it.ingredient_id = i.id
+                SELECT COALESCE(json_agg(t.name), '[]') 
+FROM ingredient_tags it
+JOIN tags t ON it.tag_id = t.id 
+WHERE it.ingredient_id = i.id
+
             )
         )
     ) FILTER (WHERE i.id IS NOT NULL), '[]') AS ingredients
@@ -65,7 +66,6 @@ GROUP BY r.id, sd.id, d.id;
 
     // ✅ Execute Query & Log Results
     const result = await pool.query(query);
-    console.log("✅ Query executed successfully:", result.rows);
 
     // ✅ Restructure Data
     const recipesMap = {};
