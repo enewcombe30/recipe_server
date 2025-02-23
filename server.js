@@ -1,15 +1,13 @@
-require("dotenv").config({ path: "./.env" });
 const express = require("express");
+const cors = require("cors");
 const { Pool } = require("pg");
-const cors = require("cors"); // Add this line to import the CORS package
 
 const app = express();
-const port = 3001;
+const PORT = 3001;
 
-// Enable CORS for all origins (can be adjusted later to be more specific)
-app.use(cors()); // Use CORS middleware globally for all routes
+require("dotenv").config();
 
-// Create a new pool to connect to the PostgreSQL database
+// ✅ Database Connection Setup
 const pool = new Pool({
   user: process.env.DB_USER,
   host: process.env.DB_HOST,
@@ -18,38 +16,96 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
-// Middleware to parse JSON
+pool
+  .connect()
+  .then(() => console.log("✅ Connected to PostgreSQL"))
+  .catch((err) => console.error("❌ Database connection error:", err));
+
+app.use(cors());
 app.use(express.json());
 
-// Define a route to fetch all recipes
-app.get("/recipes", async (req, res) => {
+// ✅ Fetch Recipes with Ingredients
+const getRecipes = async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM recipes");
-    res.json(result.rows); // Send back the result in JSON format
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Internal Server Error");
-  }
-});
+    console.log("📢 Fetching recipes..."); // Log API call
 
-// Define a route to fetch a specific recipe
-app.get("/recipes/:id", async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query("SELECT * FROM recipes WHERE id = $1", [
-      id,
-    ]);
-    if (result.rows.length === 0) {
-      return res.status(404).send("Recipe not found");
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Internal Server Error");
-  }
-});
+    const query = `
+      SELECT 
+    r.id AS recipe_id,
+    r.name AS recipe_name,
+    r.version,
+    sd.id AS sub_division_id,
+    sd.name AS sub_division_name,
+    d.id AS division_id,
+    d.name AS division_name,
+    COALESCE(json_agg(
+        json_build_object(
+            'id', i.id,
+            'name', i.name,
+            'amount', ri.amount,
+            'allergies', (
+                SELECT COALESCE(json_agg(ia.allergy), '[]') -- Allergy stored as string
+                FROM ingredient_allergies ia
+                WHERE ia.ingredient_id = i.id
+            ),
+                        'dietary_tags', (
+                SELECT COALESCE(json_agg(it.tag), '[]') 
+                FROM ingredient_tags it
+                WHERE it.ingredient_id = i.id
+            )
+        )
+    ) FILTER (WHERE i.id IS NOT NULL), '[]') AS ingredients
+FROM recipes r
+LEFT JOIN recipe_ingredients ri ON r.id = ri.recipe_id  
+LEFT JOIN ingredients i ON ri.ingredient_id = i.id
+LEFT JOIN sub_divisions sd ON r.sub_division_id = sd.id  
+LEFT JOIN divisions d ON sd.division_id = d.id
+GROUP BY r.id, sd.id, d.id;
+  `;
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
+    // ✅ Execute Query & Log Results
+    const result = await pool.query(query);
+    console.log("✅ Query executed successfully:", result.rows);
+
+    // ✅ Restructure Data
+    const recipesMap = {};
+
+    result.rows.forEach((row) => {
+      const recipeId = row.recipe_id;
+
+      if (!recipesMap[recipeId]) {
+        recipesMap[recipeId] = {
+          id: recipeId,
+          name: row.recipe_name,
+          version: row.version,
+          sub_division: {
+            id: row.sub_division_id,
+            name: row.sub_division_name,
+          },
+          division: {
+            id: row.division_id,
+            name: row.division_name,
+          },
+          ingredients: [],
+        };
+      }
+
+      if (row.ingredients) {
+        recipesMap[recipeId].ingredients = row.ingredients;
+      }
+    });
+
+    res.json(Object.values(recipesMap));
+  } catch (error) {
+    console.error("❌ Error fetching recipes:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ✅ Define API Route
+app.get("/recipes", getRecipes);
+
+// ✅ Start Server
+app.listen(PORT, () => {
+  console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });
