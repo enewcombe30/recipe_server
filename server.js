@@ -28,7 +28,7 @@ app.use(express.json());
 const getRecipes = async (req, res) => {
   try {
     const query = `
-      SELECT 
+    SELECT 
     r.id AS recipe_id,
     r.name AS recipe_name,
     r.version,
@@ -36,32 +36,38 @@ const getRecipes = async (req, res) => {
     sd.name AS sub_division_name,
     d.id AS division_id,
     d.name AS division_name,
+    COALESCE(json_build_object(
+        'id', u.id,
+        'name', u.name,
+        'role', u.role
+    ), '{}') AS created_by,
     COALESCE(json_agg(
         json_build_object(
             'id', i.id,
             'name', i.name,
             'amount', ri.amount,
             'allergies', (
-              SELECT COALESCE(json_agg(a.name), '[]') 
-              FROM ingredient_allergies ia
-              JOIN allergens a ON ia.allergen_id = a.id 
-              WHERE ia.ingredient_id = i.id
+                SELECT COALESCE(json_agg(a.name), '[]') 
+                FROM ingredient_allergens ia
+                JOIN allergens a ON ia.allergen_id = a.id 
+                WHERE ia.ingredient_id = i.id
             ),
-                        'dietary_tags', (
+            'dietary_tags', (
                 SELECT COALESCE(json_agg(t.name), '[]') 
-FROM ingredient_tags it
-JOIN tags t ON it.tag_id = t.id 
-WHERE it.ingredient_id = i.id
-
+                FROM ingredient_tags it
+                JOIN tags t ON it.tag_id = t.id 
+                WHERE it.ingredient_id = i.id
             )
         )
     ) FILTER (WHERE i.id IS NOT NULL), '[]') AS ingredients
 FROM recipes r
+LEFT JOIN users u ON r.created_by = u.id  -- ✅ Fix: Ensure user details are included
 LEFT JOIN recipe_ingredients ri ON r.id = ri.recipe_id  
 LEFT JOIN ingredients i ON ri.ingredient_id = i.id
 LEFT JOIN sub_divisions sd ON r.sub_division_id = sd.id  
 LEFT JOIN divisions d ON sd.division_id = d.id
-GROUP BY r.id, sd.id, d.id;
+GROUP BY r.id, sd.id, d.id, u.id;
+
   `;
 
     // ✅ Execute Query & Log Results
@@ -86,6 +92,7 @@ GROUP BY r.id, sd.id, d.id;
             id: row.division_id,
             name: row.division_name,
           },
+          created_by: row.created_by,
           ingredients: [],
         };
       }
