@@ -1,11 +1,10 @@
 const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
+require("dotenv").config();
 
 const app = express();
 const PORT = 3001;
-
-require("dotenv").config();
 
 // ✅ Database Connection Setup
 const pool = new Pool({
@@ -24,51 +23,54 @@ pool
 app.use(cors());
 app.use(express.json());
 
+// ✅ Import Routes AFTER initializing app
+const userRoutes = require("./routes/users")(pool); // Pass `pool` to users.js
+app.use("/api/users", userRoutes);
+
 // ✅ Fetch Recipes with Ingredients
 const getRecipes = async (req, res) => {
   try {
     const query = `
     SELECT 
-    r.id AS recipe_id,
-    r.name AS recipe_name,
-    r.version,
-    sd.id AS sub_division_id,
-    sd.name AS sub_division_name,
-    d.id AS division_id,
-    d.name AS division_name,
-    COALESCE(json_build_object(
-        'id', u.id,
-        'name', u.name,
-        'role', u.role
-    ), '{}') AS created_by,
-    COALESCE(json_agg(
-        json_build_object(
-            'id', i.id,
-            'name', i.name,
-            'amount', ri.amount,
-            'allergies', (
-                SELECT COALESCE(json_agg(a.name), '[]') 
-                FROM ingredient_allergens ia
-                JOIN allergens a ON ia.allergen_id = a.id 
-                WHERE ia.ingredient_id = i.id
-            ),
-            'dietary_tags', (
-                SELECT COALESCE(json_agg(t.name), '[]') 
-                FROM ingredient_tags it
-                JOIN tags t ON it.tag_id = t.id 
-                WHERE it.ingredient_id = i.id
-            )
-        )
-    ) FILTER (WHERE i.id IS NOT NULL), '[]') AS ingredients
-FROM recipes r
-LEFT JOIN users u ON r.created_by = u.id  -- ✅ Fix: Ensure user details are included
-LEFT JOIN recipe_ingredients ri ON r.id = ri.recipe_id  
-LEFT JOIN ingredients i ON ri.ingredient_id = i.id
-LEFT JOIN sub_divisions sd ON r.sub_division_id = sd.id  
-LEFT JOIN divisions d ON sd.division_id = d.id
-GROUP BY r.id, sd.id, d.id, u.id;
-
-  `;
+      r.id AS recipe_id,
+      r.name AS recipe_name,
+      r.version,
+      sd.id AS sub_division_id,
+      sd.name AS sub_division_name,
+      d.id AS division_id,
+      d.name AS division_name,
+      COALESCE(json_build_object(
+          'id', u.id,
+          'name', u.name,
+          'role', u.role
+      ), '{}') AS created_by,
+      COALESCE(json_agg(
+          json_build_object(
+              'id', i.id,
+              'name', i.name,
+              'amount', ri.amount,
+              'allergies', (
+                  SELECT json_agg(a.name) 
+                  FROM ingredient_allergens ia
+                  JOIN allergens a ON ia.allergen_id = a.id 
+                  WHERE ia.ingredient_id = i.id
+              ),
+              'dietary_tags', (
+                  SELECT json_agg(dt.name) 
+                  FROM ingredient_dietary_tags idt
+                  JOIN dietary_tags dt ON idt.dietary_tag_id = dt.id
+                  WHERE idt.ingredient_id = i.id
+              )
+          )
+      ) FILTER (WHERE i.id IS NOT NULL), '[]') AS ingredients
+    FROM recipes r
+    LEFT JOIN users u ON r.created_by = u.id  -- ✅ Ensure user details are included
+    LEFT JOIN recipe_ingredients ri ON r.id = ri.recipe_id  
+    LEFT JOIN ingredients i ON ri.ingredient_id = i.id
+    LEFT JOIN sub_divisions sd ON r.sub_division_id = sd.id  
+    LEFT JOIN divisions d ON sd.division_id = d.id
+    GROUP BY r.id, sd.id, d.id, u.id;
+    `;
 
     // ✅ Execute Query & Log Results
     const result = await pool.query(query);
